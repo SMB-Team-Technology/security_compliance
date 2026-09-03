@@ -27,6 +27,7 @@ locals {
     "secretmanager.googleapis.com",
     "servicenetworking.googleapis.com",
     "compute.googleapis.com",
+    "container.googleapis.com",
   ]
 }
 
@@ -182,4 +183,62 @@ resource "google_secret_manager_secret_iam_member" "deploy_reads_s3_hmac_secret"
   project   = var.project_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${var.deploy_service_account_email}"
+}
+
+# Standard (non-Autopilot) cluster with pd-standard node disks, deliberately:
+# Autopilot's default pd-balanced node disks draw from the same regional
+# SSD_TOTAL_GB quota as Cloud SQL, and probod doesn't need fast local disk
+# since its state lives in Postgres/GCS, not on the node.
+resource "google_container_cluster" "probo" {
+  name     = var.gke_cluster_name
+  project  = var.project_id
+  location = var.region
+
+  network = data.google_compute_network.vpc.id
+
+  # Managed separately below so its machine type / disk / count can change
+  # without recreating the cluster.
+  remove_default_node_pool = true
+  initial_node_count       = 1
+
+  depends_on = [google_project_service.this]
+}
+
+resource "google_container_node_pool" "default" {
+  name     = "default-pool"
+  project  = var.project_id
+  location = var.region
+  cluster  = google_container_cluster.probo.name
+
+  node_count = var.gke_node_count
+
+  node_config {
+    machine_type = var.gke_node_machine_type
+    disk_type    = "pd-standard"
+    disk_size_gb = var.gke_node_disk_size_gb
+
+    oauth_scopes = [
+      "https://www.googleapis.com/auth/cloud-platform",
+    ]
+  }
+}
+
+resource "google_project_iam_member" "deploy_gke_developer" {
+  project = var.project_id
+  role    = "roles/container.developer"
+  member  = "serviceAccount:${var.deploy_service_account_email}"
+}
+
+resource "google_project_iam_member" "deploy_cloudsql_viewer" {
+  project = var.project_id
+  role    = "roles/cloudsql.viewer"
+  member  = "serviceAccount:${var.deploy_service_account_email}"
+}
+
+# Needed to list the HMAC key's accessId at deploy time (gcloud storage hmac
+# keys list); narrower than roles/storage.admin.
+resource "google_project_iam_member" "deploy_hmac_key_viewer" {
+  project = var.project_id
+  role    = "roles/storage.hmacKeyAdmin"
+  member  = "serviceAccount:${var.deploy_service_account_email}"
 }
