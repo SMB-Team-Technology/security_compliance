@@ -72,6 +72,7 @@ on:
       - "Dockerfile"
       - "entrypoint.sh"
       - "contrib/helm/charts/probo/**"
+      - "contrib/terraform/gcp-probo-infra/**"
       - ".github/workflows/deploy-gcp.yaml"
   workflow_dispatch: {}
 
