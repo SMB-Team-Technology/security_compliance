@@ -130,9 +130,31 @@ jobs:
           IMAGE: "${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/probo/probod"
           TAG: "${{ steps.tag.outputs.value }}"
         run: |
+          # `gcloud builds submit --tag` runs a plain `docker build` with no
+          # build args. The Dockerfile's COPY lines key off $TARGETPLATFORM,
+          # a buildx-only automatic ARG that the official multi-arch release
+          # pipeline gets from `docker buildx build --platform`; under a
+          # plain build it's empty, so COPY resolves to a path that doesn't
+          # exist and the build fails immediately. This inline Cloud Build
+          # config supplies it explicitly for this single-arch build.
+          cat > /tmp/cloudbuild.yaml <<'EOF'
+          steps:
+            - name: 'gcr.io/cloud-builders/docker'
+              args:
+                - build
+                - --build-arg
+                - TARGETPLATFORM=linux/amd64
+                - -t
+                - '$_IMAGE:$_TAG'
+                - .
+          images:
+            - '$_IMAGE:$_TAG'
+          EOF
+
           # Submit async to avoid the log-streaming permission requirement.
           BUILD=$(gcloud builds submit \
-            --tag "${IMAGE}:${TAG}" \
+            --config=/tmp/cloudbuild.yaml \
+            --substitutions="_IMAGE=${IMAGE},_TAG=${TAG}" \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
             --async \
             --format="value(name)")
