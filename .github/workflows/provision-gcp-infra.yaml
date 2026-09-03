@@ -1,17 +1,17 @@
-name: "Provision GCP Infra (Postgres + GCS)"
+name: "Provision GCP Infra (Postgres + GCS + GKE) — manual plan/apply"
 
-# Applies contrib/terraform/gcp-probo-infra: the Cloud SQL Postgres
-# instance, GCS bucket, HMAC key, and the two Secret Manager secrets that
-# deploy-gcp.yaml reads at deploy time. Manual trigger only, on purpose —
-# this touches a stateful database, so it must never run implicitly on a
-# push the way the app deploy does.
+# deploy-gcp.yaml now applies contrib/terraform/gcp-probo-infra itself on
+# every run (idempotent), so this workflow is no longer a required step
+# before deploying. Keep it around for previewing a Terraform change
+# (`action: plan`) before it lands in a deploy, or for an ad hoc `apply`
+# outside the deploy pipeline.
 #
 # See contrib/terraform/gcp-probo-infra/README.md for the one-time bootstrap
 # (enabling APIs, creating the Terraform state bucket) that has to happen
-# before the first run.
+# before the first run of either this or deploy-gcp.yaml.
 #
 # Required secrets (beyond GCP_SA_KEY / GCP_PROJECT_ID, shared with
-# deploy-gcp.yaml): TF_STATE_BUCKET, GCP_REGION, GCS_BUCKET_NAME
+# deploy-gcp.yaml): TF_STATE_BUCKET, GCP_REGION, GCS_BUCKET_NAME, GKE_CLUSTER
 
 on:
   workflow_dispatch:
@@ -61,6 +61,7 @@ jobs:
           TF_VAR_project_id: "${{ secrets.GCP_PROJECT_ID }}"
           TF_VAR_region: "${{ secrets.GCP_REGION }}"
           TF_VAR_bucket_name: "${{ secrets.GCS_BUCKET_NAME }}"
+          TF_VAR_gke_cluster_name: "${{ secrets.GKE_CLUSTER }}"
           TF_VAR_deploy_service_account_email: "${{ steps.sa.outputs.email }}"
         run: |
           if [ "${{ inputs.action }}" = "apply" ]; then

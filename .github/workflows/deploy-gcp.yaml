@@ -11,17 +11,35 @@ name: "Deploy to GCP (GKE)"
 # service-account key in GCP_SA_KEY (rather than Workload Identity
 # Federation).
 #
+# This workflow provisions its own infrastructure on every run (Terraform
+# apply is idempotent — a no-op once things exist) via
+# contrib/terraform/gcp-probo-infra: the GKE cluster, the Cloud SQL Postgres
+# instance, the GCS bucket, and the Secret Manager entries it reads a few
+# steps later. Nothing needs to be created by hand first except the two
+# one-time bootstraps Terraform can't do for itself (enabling APIs, creating
+# its own state bucket) — see contrib/terraform/gcp-probo-infra/README.md.
+# provision-gcp-infra.yaml still exists for a manual `plan`/`apply` outside
+# a deploy (e.g. to preview a Terraform change), but is no longer a
+# prerequisite step you have to remember to run.
+#
 # Required repository/environment secrets:
-#   GCP_SA_KEY              service account JSON key (Artifact Registry
-#                           writer, Cloud Build editor, GKE developer, and
-#                           the Secret Manager + Cloud SQL/Storage viewer
-#                           roles provision-gcp-infra.yaml grants it)
+#   GCP_SA_KEY              service account JSON key. Needs Artifact
+#                           Registry writer, Cloud Build editor, and enough
+#                           to run `terraform apply` for the resources in
+#                           contrib/terraform/gcp-probo-infra (Compute,
+#                           Cloud SQL, Storage, Secret Manager, GKE, and
+#                           Project IAM admin — it's granting itself the
+#                           narrower runtime roles listed below as part of
+#                           that apply)
 #   GCP_PROJECT_ID          GCP project id
-#   GCP_REGION              region the Postgres instance and GCS bucket live
-#                           in (set by provision-gcp-infra.yaml)
-#   GCS_BUCKET_NAME         the bucket name given to provision-gcp-infra.yaml
-#   GKE_CLUSTER             GKE cluster name
-#   GKE_CLUSTER_LOCATION    GKE cluster region (regional cluster) or zone
+#   GCP_REGION              region for the Postgres instance, GCS bucket,
+#                           and GKE cluster
+#   GCS_BUCKET_NAME         globally unique bucket name to create/use
+#   TF_STATE_BUCKET         GCS bucket holding this module's Terraform state
+#                           (create once by hand — see the module README)
+#   GKE_CLUSTER             GKE cluster name to create/use
+#   GKE_CLUSTER_LOCATION    must equal GCP_REGION (the cluster Terraform
+#                           creates is regional)
 #   GAR_LOCATION            Artifact Registry location, e.g. us-central1
 #   PROBO_DOMAIN            public hostname, e.g. probo.example.com
 #   PROBO_ENCRYPTION_KEY    openssl rand -base64 32
@@ -34,17 +52,14 @@ name: "Deploy to GCP (GKE)"
 # Optional (added only when set):
 #   OPENAI_API_KEY, ANTHROPIC_API_KEY
 #
-# Not required anymore: POSTGRES_HOST/PASSWORD and S3_ACCESS_KEY_ID/
-# S3_SECRET_ACCESS_KEY used to be manually-copied secrets. They're now
-# resolved at deploy time straight from the infrastructure that
-# provision-gcp-infra.yaml (contrib/terraform/gcp-probo-infra) creates —
-# the DB host and HMAC access key are looked up with gcloud, the DB
-# password and HMAC secret key are read from Secret Manager. Run that
-# workflow first; see contrib/terraform/gcp-probo-infra/README.md.
+# Not required as secrets: POSTGRES_HOST/PASSWORD and S3_ACCESS_KEY_ID/
+# S3_SECRET_ACCESS_KEY. They're resolved at deploy time straight from the
+# infrastructure this workflow just applied — the DB host and HMAC access
+# key are looked up with gcloud, the DB password and HMAC secret key are
+# read from Secret Manager.
 #
-# Prerequisites this workflow does not create: the GKE cluster and the
-# Artifact Registry Docker repo named "probo" in GAR_LOCATION. The Postgres
-# instance and GCS bucket come from provision-gcp-infra.yaml, not this one.
+# Prerequisite this workflow does not create: the Artifact Registry Docker
+# repo named "probo" in GAR_LOCATION.
 
 on:
   push:
@@ -121,6 +136,31 @@ jobs:
       - name: "Install gke-gcloud-auth-plugin"
         run: "gcloud components install gke-gcloud-auth-plugin --quiet"
 
+      - uses: "hashicorp/setup-terraform@v3"
+
+      - name: "Provision infra (Terraform apply, idempotent)"
+        working-directory: "contrib/terraform/gcp-probo-infra"
+        env:
+          TF_VAR_project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          TF_VAR_region: "${{ secrets.GCP_REGION }}"
+          TF_VAR_bucket_name: "${{ secrets.GCS_BUCKET_NAME }}"
+          TF_VAR_gke_cluster_name: "${{ secrets.GKE_CLUSTER }}"
+        run: |
+          # Idempotent: creates the GKE cluster, Cloud SQL instance, GCS
+          # bucket, and Secret Manager entries on the first run, and is a
+          # no-op plan/apply on every run after that. See
+          # contrib/terraform/gcp-probo-infra/README.md for the one-time
+          # manual bootstrap (enabling APIs, creating the state bucket)
+          # this can't do for itself.
+          DEPLOY_SA_EMAIL=$(echo '${{ secrets.GCP_SA_KEY }}' | jq -r .client_email)
+
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="prefix=probo-infra"
+
+          terraform apply -auto-approve \
+            -var="deploy_service_account_email=${DEPLOY_SA_EMAIL}"
+
       - name: "Compute image tag"
         id: tag
         run: echo "value=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
@@ -189,10 +229,9 @@ jobs:
         env:
           PROJECT: "${{ secrets.GCP_PROJECT_ID }}"
         run: |
-          # These come from contrib/terraform/gcp-probo-infra, applied by
-          # provision-gcp-infra.yaml — nothing here creates them. Resource
-          # names (instance, service account, secret ids) must match that
-          # module's defaults.
+          # Resource names (instance, service account, secret ids) must
+          # match contrib/terraform/gcp-probo-infra's defaults — the
+          # "Provision infra" step above just applied that module.
           DB_HOST=$(gcloud sql instances describe probo-db \
             --project "$PROJECT" --format="value(ipAddresses[0].ipAddress)")
           DB_PASSWORD=$(gcloud secrets versions access latest \

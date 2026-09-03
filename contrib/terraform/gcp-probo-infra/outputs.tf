@@ -52,6 +52,14 @@ output "db_password_secret_id" {
   value = google_secret_manager_secret.db_password.secret_id
 }
 
+output "gke_cluster_name" {
+  value = google_container_cluster.probo.name
+}
+
+output "gke_cluster_location" {
+  value = google_container_cluster.probo.location
+}
+
 output "s3_hmac_secret_secret_id" {
   value = google_secret_manager_secret.s3_hmac_secret.secret_id
 }

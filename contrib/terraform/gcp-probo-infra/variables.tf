@@ -73,5 +73,29 @@ variable "storage_service_account_id" {
 
 variable "deploy_service_account_email" {
   type        = string
-  description = "Email of the service account behind deploy-gcp.yaml's GCP_SA_KEY. Granted read access to the two secrets this module creates so the deploy workflow can fetch them without a manual copy-paste step."
+  description = "Email of the service account behind deploy-gcp.yaml's GCP_SA_KEY. Granted read access to the two secrets this module creates, GKE developer access on the cluster, and Cloud SQL/Storage viewer access so the deploy workflow can fetch everything without a manual step."
+}
+
+variable "gke_cluster_name" {
+  type        = string
+  default     = "probo-prod"
+  description = "GKE cluster name. Keep in sync with deploy-gcp.yaml's GKE_CLUSTER secret."
+}
+
+variable "gke_node_machine_type" {
+  type        = string
+  default     = "e2-standard-4"
+  description = "Machine type for the GKE node pool."
+}
+
+variable "gke_node_count" {
+  type        = number
+  default     = 2
+  description = "Node count per zone in the node pool (regional cluster: total nodes = count * zones in the region)."
+}
+
+variable "gke_node_disk_size_gb" {
+  type        = number
+  default     = 50
+  description = "Boot disk size per node, in GB."
 }
