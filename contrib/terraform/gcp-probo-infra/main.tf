@@ -208,6 +208,12 @@ resource "google_container_cluster" "probo" {
   remove_default_node_pool = true
   initial_node_count       = 1
 
+  # TEMPORARY: false to let this apply replace a stale cluster left behind
+  # in a different region by an earlier failed run (the provider defaults
+  # this to true, which blocked exactly that). Flip back to true once a
+  # healthy cluster exists — see the follow-up commit.
+  deletion_protection = false
+
   depends_on = [google_project_service.this]
 }
 
