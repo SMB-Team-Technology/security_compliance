@@ -76,6 +76,13 @@ resource "google_sql_database_instance" "probo" {
 
   settings {
     tier = var.sql_tier
+    # A project whose Cloud SQL default edition is ENTERPRISE_PLUS rejects
+    # custom db-custom-* tiers outright ("Invalid Tier ... for
+    # ENTERPRISE_PLUS Edition") and only accepts predefined
+    # db-perf-optimized-N-* tiers. Force ENTERPRISE explicitly so
+    # var.sql_tier's custom tier is always valid, regardless of the
+    # project's default.
+    edition = "ENTERPRISE"
 
     ip_configuration {
       ipv4_enabled    = false
